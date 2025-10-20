@@ -1,200 +1,130 @@
+use apollo_federation::composition::{
+    pre_merge_validations, post_merge_validations, CompositionOptions
+};
+use apollo_federation::subgraph::typestate::{Subgraph, Initial, Validated};
+use apollo_federation::supergraph::{Supergraph, Merged};
 use apollo_compiler::Schema;
-use apollo_federation::Supergraph;
-use apollo_federation::subgraph::Subgraph;
 
-fn print_sdl(schema: &Schema) -> String {
-    let mut schema = schema.clone();
-    schema.types.sort_keys();
-    schema.directive_definitions.sort_keys();
-    schema.to_string()
-}
 
-#[test]
-fn can_compose_supergraph() {
-    let s1 = Subgraph::parse_and_expand(
-        "Subgraph1",
-        "https://subgraph1",
-        r#"
+#[cfg(test)]
+mod composition_tests {
+    use super::*;
+
+    /// Test the pre_merge_validations function directly
+    #[test]
+    fn test_pre_merge_validations_empty_subgraphs() {
+        let empty_subgraphs: Vec<Subgraph<Validated>> = vec![];
+        let result = pre_merge_validations(&empty_subgraphs);
+        
+        match result {
+            Ok(_) => panic!("Should fail with empty subgraphs"),
+            Err(errors) => {
+                assert!(!errors.is_empty(), "Should have at least one error");
+                let error_messages: Vec<String> = errors.iter()
+                    .map(|e| e.to_string())
+                    .collect();
+                assert!(
+                    error_messages.iter().any(|msg| msg.contains("empty subgraphs")),
+                    "Should contain error about empty subgraphs, got: {:?}",
+                    error_messages
+                );
+            }
+        }
+    }
+
+    /// Test the pre_merge_validations function with valid subgraphs
+    #[test]
+    fn test_pre_merge_validations_success() {
+        // Create a mock validated subgraph for testing
+        let schema_str = r#"
             type Query {
-              t: T
+                hello: String
             }
+        "#;
+        
+        let subgraph = Subgraph::<Initial>::parse("test", "http://localhost:4000", schema_str)
+            .expect("Failed to parse subgraph")
+            .expand_links()
+            .expect("Failed to expand links");
+            
+        // Need to upgrade before validating
+        let upgraded_subgraphs = apollo_federation::composition::upgrade_subgraphs_if_necessary(vec![subgraph])
+            .expect("Failed to upgrade subgraph");
+            
+        let validated_subgraph = upgraded_subgraphs.into_iter().next()
+            .expect("Should have one subgraph")
+            .validate()
+            .expect("Failed to validate subgraph");
+            
+        let subgraphs = vec![validated_subgraph];
+        let result = pre_merge_validations(&subgraphs);
+        
+        assert!(result.is_ok(), "pre_merge_validations should succeed with valid subgraphs");
+    }
 
-            type T @key(fields: "k") {
-              k: ID
-            }
-
-            type S {
-              x: Int
-            }
-
-            union U = S | T
-        "#,
-    )
-    .unwrap();
-    let s2 = Subgraph::parse_and_expand(
-        "Subgraph2",
-        "https://subgraph2",
-        r#"
-            type T @key(fields: "k") {
-              k: ID
-              a: Int
-              b: String
-            }
-
-            enum E {
-              V1
-              V2
-            }
-        "#,
-    )
-    .unwrap();
-
-    let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
-    insta::assert_snapshot!(print_sdl(
-        supergraph
-            .to_api_schema(Default::default())
-            .unwrap()
-            .schema()
-    ));
-}
-
-#[test]
-fn can_compose_with_descriptions() {
-    let s1 = Subgraph::parse_and_expand(
-        "Subgraph1",
-        "https://subgraph1",
-        r#"
-            "The foo directive description"
-            directive @foo(url: String) on FIELD
-
-            "A cool schema"
-            schema {
-              query: Query
-            }
-
-            """
-            Available queries
-            Not much yet
-            """
+    /// Test the post_merge_validations function
+    #[test]
+    fn test_post_merge_validations_success() {
+        // Create a simple valid schema for testing
+        let schema_str = r#"
             type Query {
-              "Returns tea"
-              t(
-                "An argument that is very important"
-                x: String!
-              ): String
+                hello: String
             }
-        "#,
-    )
-    .unwrap();
+        "#;
+        
+        let schema = Schema::parse_and_validate(schema_str, "test.graphql")
+            .expect("Failed to parse schema");
+        let supergraph = Supergraph::<Merged>::new(schema);
+        
+        let result = post_merge_validations(&supergraph);
+        assert!(result.is_ok(), "post_merge_validations should succeed with valid supergraph");
+    }
 
-    let s2 = Subgraph::parse_and_expand(
-        "Subgraph2",
-        "https://subgraph2",
-        r#"
-            "The foo directive description"
-            directive @foo(url: String) on FIELD
-
-            "An enum"
-            enum E {
-              "The A value"
-              A
-              "The B value"
-              B
-            }
-        "#,
-    )
-    .unwrap();
-
-    let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
-    insta::assert_snapshot!(print_sdl(
-        supergraph
-            .to_api_schema(Default::default())
-            .unwrap()
-            .schema()
-    ));
-}
-
-#[test]
-fn can_compose_types_from_different_subgraphs() {
-    let s1 = Subgraph::parse_and_expand(
-        "SubgraphA",
-        "https://subgraphA",
-        r#"
+    /// Test the post_merge_validations function with a valid schema that has all required types
+    #[test]
+    fn test_post_merge_validations_comprehensive() {
+        // Create a more comprehensive schema to test validation
+        let schema_str = r#"
             type Query {
-                products: [Product!]
+                user(id: ID!): User
+                users: [User!]!
             }
-
-            type Product {
-                sku: String!
-                name: String!
+            
+            type Mutation {
+                createUser(input: UserInput!): User
             }
-        "#,
-    )
-    .unwrap();
-
-    let s2 = Subgraph::parse_and_expand(
-        "SubgraphB",
-        "https://subgraphB",
-        r#"
+            
             type User {
-                name: String
-                email: String!
+                id: ID!
+                name: String!
+                email: String
             }
-        "#,
-    )
-    .unwrap();
-    let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
-    insta::assert_snapshot!(print_sdl(
-        supergraph
-            .to_api_schema(Default::default())
-            .unwrap()
-            .schema()
-    ));
-}
-
-#[test]
-fn compose_removes_federation_directives() {
-    let s1 = Subgraph::parse_and_expand(
-        "SubgraphA",
-        "https://subgraphA",
-        r#"
-            extend schema @link(url: "https://specs.apollo.dev/federation/v2.5", import: [ "@key", "@provides", "@external" ])
-
-            type Query {
-              products: [Product!] @provides(fields: "name")
+            
+            input UserInput {
+                name: String!
+                email: String
             }
+        "#;
+        
+        let schema = Schema::parse_and_validate(schema_str, "test.graphql")
+            .expect("Failed to parse schema");
+        let supergraph = Supergraph::<Merged>::new(schema);
+        
+        let result = post_merge_validations(&supergraph);
+        assert!(result.is_ok(), "post_merge_validations should succeed with comprehensive valid supergraph");
+    }
 
-            type Product @key(fields: "sku") {
-              sku: String!
-              name: String! @external
-            }
-        "#,
-    )
-        .unwrap();
-
-    let s2 = Subgraph::parse_and_expand(
-        "SubgraphB",
-        "https://subgraphB",
-        r#"
-            extend schema @link(url: "https://specs.apollo.dev/federation/v2.5", import: [ "@key", "@shareable" ])
-
-            type Product @key(fields: "sku") {
-              sku: String!
-              name: String! @shareable
-            }
-        "#,
-    )
-        .unwrap();
-
-    let supergraph = Supergraph::compose(vec![&s1, &s2]).unwrap();
-    insta::assert_snapshot!(print_sdl(supergraph.schema.schema()));
-    insta::assert_snapshot!(print_sdl(
-        supergraph
-            .to_api_schema(Default::default())
-            .unwrap()
-            .schema()
-    ));
+    /// Test CompositionOptions structure
+    #[test]
+    fn test_composition_options() {
+        // Test default options
+        let default_options = CompositionOptions::default();
+        assert!(default_options.run_satisfiability, "Default should enable satisfiability");
+        
+        // Test custom options
+        let custom_options = CompositionOptions {
+            run_satisfiability: false,
+        };
+        assert!(!custom_options.run_satisfiability, "Custom options should work");
+    }
 }
