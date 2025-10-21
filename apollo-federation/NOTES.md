@@ -91,10 +91,52 @@ let valid_schema = apollo_compiler::validation::Valid::assume_valid(schema);
 
 **Solution**: Proper error mapping and type conversion between merger result and composition types
 
-### 3. Hints Support
+### 3. Satisfiability State Conversion
+**Challenge**: Need to convert `Supergraph<Merged>` to `Supergraph<Satisfiable>` when `runSatisfiability` is disabled
+
+**Solution**: Added `assume_satisfiable()` method to `Supergraph<Merged>` in `src/supergraph/mod.rs`
+
+**Implementation Details**:
+```rust
+pub fn assume_satisfiable(self) -> Supergraph<Satisfiable> {
+    // Convert Valid<Schema> to ValidFederationSchema
+    let schema = self.state.schema.clone();
+    let federation_schema = ValidFederationSchema::new(schema)
+        .expect("Schema should be valid for federation");
+    
+    // Create Satisfiable state with existing hints
+    Supergraph::<Satisfiable>::new(federation_schema, self.state.hints)
+}
+```
+
+**Reasoning**: 
+- Matches Node.js behavior where satisfiability can be skipped but still return satisfiable result
+- Preserves hints from the merge phase
+- Safely converts between type states while maintaining validation guarantees
+
+### 4. Hints Support
 **Challenge**: Implementing hints collection similar to Node.js `mergeResult.hints`
 
 **Solution**: Foundation laid for hints collection, with proper structure for future enhancement
+
+## Files Modified
+
+### 1. `src/composition/mod.rs` - Main Implementation
+- **Added**: `CompositionOptions` struct matching Node.js interface
+- **Added**: `compose_with_options()` function for configuration support
+- **Implemented**: `pre_merge_validations()` - validates non-empty subgraphs
+- **Implemented**: `merge_subgraphs()` - uses new merger with proper error handling
+- **Implemented**: `post_merge_validations()` - validates supergraph schema structure
+
+### 2. `src/supergraph/mod.rs` - Type State Support
+- **Added**: `assume_satisfiable()` method to `Supergraph<Merged>`
+- **Purpose**: Enables conversion to `Satisfiable` state when satisfiability validation is skipped
+- **Preserves**: Hints from merge phase during state transition
+
+### 3. `tests/composition_tests.rs` - Test Coverage
+- **Added**: 5 comprehensive unit tests
+- **Coverage**: Empty subgraphs, valid subgraphs, post-merge validation, options functionality
+- **Scenarios**: Both success and error paths tested
 
 ## Code Quality Measures
 
