@@ -1,5 +1,6 @@
 mod satisfiability;
 
+use std::collections::HashSet;
 use std::vec;
 
 pub use crate::composition::satisfiability::validate_satisfiability;
@@ -96,14 +97,27 @@ pub fn validate_subgraphs(
 pub fn pre_merge_validations(
     subgraphs: &[Subgraph<Validated>],
 ) -> Result<(), Vec<CompositionError>> {
-    // For now, just validate we have subgraphs to work with
-    // TODO: Add cross-subgraph validations like @key conflicts, @provides/@requires consistency
     if subgraphs.is_empty() {
         return Err(vec![CompositionError::InternalError {
             message: "Cannot compose with empty subgraphs list".to_string(),
         }]);
     }
-
+    
+    // Check for duplicate subgraph names
+    let mut seen_names = HashSet::new();
+    for subgraph in subgraphs {
+        if !seen_names.insert(&subgraph.name) {
+            return Err(vec![CompositionError::InternalError {
+                message: format!("Duplicate subgraph name: {}", subgraph.name),
+            }]);
+        }
+    }
+    
+    // TODO: Add more cross-subgraph validations:
+    // - Check @key fields exist and are valid
+    // - Validate @provides/@requires consistency
+    // - Check for type conflicts across subgraphs
+    
     Ok(())
 }
 
@@ -142,18 +156,34 @@ pub fn post_merge_validations(
     supergraph: &Supergraph<Merged>,
 ) -> Result<(), Vec<CompositionError>> {
     let schema = supergraph.schema();
+    let mut errors = Vec::new();
 
-    // Basic validation - make sure we have a query type
+    // Check query type exists
     if schema.schema_definition.query.is_none() {
-        return Err(vec![CompositionError::TypeDefinitionInvalid {
+        errors.push(CompositionError::TypeDefinitionInvalid {
             message: "Supergraph must have a query type".to_string(),
-        }]);
+        });
     }
 
-    // TODO: Add more validations as needed
-    // - Check for orphaned types
-    // - Validate directive applications
-    // - Federation-specific consistency checks
+    // Check for _Entity union if there are entities
+    if let Some(entity_type) = schema.types.get("_Entity") {
+        if let apollo_compiler::schema::ExtendedType::Union(union_type) = entity_type {
+            if union_type.members.is_empty() {
+                errors.push(CompositionError::TypeDefinitionInvalid {
+                    message: "_Entity union exists but has no members".to_string(),
+                });
+            }
+        }
+    }
 
-    Ok(())
+    // TODO: Add more validations:
+    // - Check for orphaned types (not reachable from Query/Mutation/Subscription)
+    // - Validate all @key directives are valid
+    // - Check entity consistency
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
