@@ -43,13 +43,16 @@ The new merger returns a different result type than what the composition functio
 When `runSatisfiability` is false, we still need to return a `Supergraph<Satisfiable>`. Had to add an `assume_satisfiable()` method to handle this case.
 
 ## Testing
-Added tests for the main scenarios:
-- Empty subgraphs (should error)
-- Valid subgraphs (should succeed)  
-- Post-merge validation with different schema complexities
-- Options functionality
+Added 6 unit tests to cover the implemented functions:
 
-The hardest part was creating proper test subgraphs that go through the full validation pipeline. Had to understand how to parse, expand, upgrade, and validate subgraphs properly.
+1. **`test_pre_merge_validations_empty_subgraphs`** - Tests error handling when no subgraphs provided
+2. **`test_pre_merge_validations_success`** - Tests successful validation with valid subgraphs
+3. **`test_pre_merge_validations_duplicate_names`** - Tests duplicate subgraph name detection
+4. **`test_post_merge_validations_success`** - Tests basic supergraph validation
+5. **`test_post_merge_validations_comprehensive`** - Tests validation with complex schema (mutations, inputs, etc.)
+6. **`test_composition_options`** - Tests the CompositionOptions struct and default behavior
+
+The hardest part was creating proper test subgraphs that go through the full validation pipeline. Had to understand how to parse, expand, upgrade, and validate subgraphs properly. Also made sure to preserve the existing integration tests that verify end-to-end composition.
 
 ## What I Changed
 
@@ -64,8 +67,10 @@ The hardest part was creating proper test subgraphs that go through the full val
 - This was needed because the composition flow still needs to return a `Supergraph<Satisfiable>` even when we skip the validation
 
 ### `tests/composition_tests.rs`
-- New test file with 5 tests covering the implemented functions
+- Preserved 4 existing integration tests that verify end-to-end composition
+- Added 6 new unit tests covering the implemented functions
 - Tests both success and error cases
+- Total: 10 tests ensuring comprehensive coverage
 
 ## Things That Could Be Improved
 
